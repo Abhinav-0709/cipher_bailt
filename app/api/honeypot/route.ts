@@ -62,10 +62,24 @@ export async function OPTIONS() {
 }
 
 export async function GET() {
-    const response = NextResponse.json({
-        message: "Cipher Bait Honeypot API is active. Send a POST request with { 'message': '...' } to interact.",
-        status: "operational"
-    }, { status: 200 });
+    // Return a sample valid response structure for demonstration
+    const sampleResponse = {
+        scam_detected: false,
+        confidence: 0.15,
+        extracted_intel: {
+            upi: [],
+            bank_ac: [],
+            links: []
+        },
+        response_message: "Namaste beta! I am listening. Why are you messaging this old man?",
+        metadata: {
+            turn_count: 1,
+            latency_ms: 45,
+            note: "Sample response. Send POST to interact."
+        }
+    };
+
+    const response = NextResponse.json(sampleResponse, { status: 200 });
     return setCorsHeaders(response);
 }
 
@@ -124,10 +138,16 @@ export async function POST(req: NextRequest) {
         });
 
         // Prepare History for Gemini
-        const chatHistory = history.map((msg: any) => ({
+        let chatHistory = history.map((msg: any) => ({
             role: msg.role === 'assistant' ? 'model' : (msg.role || 'user'),
             parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }],
         }));
+
+        // SANITIZE: Gemini requires the first history item to be 'user'.
+        // If the first item is 'model', we must drop it.
+        while (chatHistory.length > 0 && chatHistory[0].role === 'model') {
+            chatHistory.shift();
+        }
 
         const chat = model.startChat({
             history: chatHistory,

@@ -23,8 +23,8 @@ export default function Home() {
             <Link href="#how-it-works" className="hover:text-white transition-colors">How it Works</Link>
             <Link href="https://github.com/Abhinav-0709/cipher_bailt" className="hover:text-white transition-colors">GitHub</Link>
           </div>
-          <Link href="/api/honeypot" className="px-5 py-2.5 bg-white text-black text-sm font-semibold rounded-full hover:bg-zinc-200 transition-colors">
-            Access API
+          <Link href="/demo" className="px-5 py-2.5 bg-white text-black text-sm font-semibold rounded-full hover:bg-zinc-200 transition-colors">
+            Live Demo
           </Link>
         </div>
       </nav>
@@ -52,8 +52,8 @@ export default function Home() {
           </p>
           
           <div className="flex flex-col md:flex-row items-center justify-center gap-4">
-            <Link href="/api/honeypot" className="w-full md:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
-              Deploy Honeypot
+            <Link href="/demo" className="w-full md:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
+              Try Live Demo
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14"/>
                 <path d="m12 5 7 7-7 7"/>
