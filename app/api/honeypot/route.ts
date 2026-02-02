@@ -51,13 +51,21 @@ const RESPONSE_SCHEMA = {
 // CORS Headers helper
 function setCorsHeaders(res: NextResponse) {
   res.headers.set('Access-Control-Allow-Origin', '*');
-  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
   return res;
 }
 
 export async function OPTIONS() {
   const response = NextResponse.json({}, { status: 200 });
+  return setCorsHeaders(response);
+}
+
+export async function GET() {
+  const response = NextResponse.json({
+    message: "Cipher Bait Honeypot API is active. Send a POST request with { 'message': '...' } to interact.",
+    status: "operational"
+  }, { status: 200 });
   return setCorsHeaders(response);
 }
 
