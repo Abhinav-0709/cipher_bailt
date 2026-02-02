@@ -30,156 +30,169 @@ Output Strict JSON.
 `;
 
 const RESPONSE_SCHEMA = {
-    type: SchemaType.OBJECT,
-    properties: {
-        scam_detected: { type: SchemaType.BOOLEAN },
-        confidence: { type: SchemaType.NUMBER },
-        extracted_intel: {
-            type: SchemaType.OBJECT,
-            properties: {
-                upi: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                bank_ac: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                links: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            },
-            required: ["upi", "bank_ac", "links"]
-        },
-        response_message: { type: SchemaType.STRING },
+  type: SchemaType.OBJECT,
+  properties: {
+    scam_detected: { type: SchemaType.BOOLEAN },
+    confidence: { type: SchemaType.NUMBER },
+    extracted_intel: {
+      type: SchemaType.OBJECT,
+      properties: {
+        upi: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+        bank_ac: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+        links: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+      },
+      required: ["upi", "bank_ac", "links"]
     },
-    required: ["scam_detected", "confidence", "extracted_intel", "response_message"]
+    response_message: { type: SchemaType.STRING },
+  },
+  required: ["scam_detected", "confidence", "extracted_intel", "response_message"]
 } as const;
 
-export async function POST(req: NextRequest) {
-    const startTime = Date.now();
+// CORS Headers helper
+function setCorsHeaders(res: NextResponse) {
+  res.headers.set('Access-Control-Allow-Origin', '*');
+  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+  return res;
+}
 
-    // 1. Auth Check
-    const apiKey = req.headers.get('x-api-key');
-    if (!apiKey || apiKey !== process.env.GUVI_AUTH_KEY) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function OPTIONS() {
+  const response = NextResponse.json({}, { status: 200 });
+  return setCorsHeaders(response);
+}
+
+export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+
+  // 1. Auth Check
+  const apiKey = req.headers.get('x-api-key');
+  if (!apiKey || apiKey !== process.env.GUVI_AUTH_KEY) {
+    return setCorsHeaders(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+  }
+
+  try {
+    let body;
+    try {
+        body = await req.json();
+    } catch {
+        return setCorsHeaders(NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }));
     }
 
+    const { message, history = [], sessionId } = body;
+    
+    if (!message) {
+         return setCorsHeaders(NextResponse.json({ error: 'Field "message" is required' }, { status: 400 }));
+    }
+
+    // Connect DB
+    await dbConnect();
+
+    // 2. Gemini Interaction
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: RESPONSE_SCHEMA as any,
+      },
+    });
+
+    // Prepare History for Gemini
+    const chatHistory = history.map((msg: any) => ({
+      role: msg.role === 'assistant' ? 'model' : (msg.role || 'user'),
+      parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }],
+    }));
+
+    const chat = model.startChat({
+      history: chatHistory,
+    });
+
+    const result = await chat.sendMessage(message);
+    const responseText = result.response.text();
+    
+    let data;
     try {
-        const body = await req.json();
-        const { message, history = [], sessionId } = body;
+      data = JSON.parse(responseText);
+    } catch (e) {
+      console.error("Failed to parse JSON from Gemini", responseText);
+      data = {
+        scam_detected: true,
+        confidence: 0,
+        extracted_intel: { upi: [], bank_ac: [], links: [] },
+        response_message: "Beta, I am not understanding. Can you call me?"
+      };
+    }
 
-        // Connect DB
-        await dbConnect();
+    // 3. Update DB
+    const latency = Date.now() - startTime;
+    const currentTurnCount = history.length + 1;
 
-        // 2. Gemini Interaction
-        const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
-            systemInstruction: SYSTEM_PROMPT,
-            generationConfig: {
-                responseMimeType: "application/json",
-                responseSchema: RESPONSE_SCHEMA as any,
+    const intelUpdate = data.extracted_intel || { upi: [], bank_ac: [], links: [] };
+    
+    const dbOperations = async () => {
+        const query = sessionId ? { sessionId } : { sessionId: `gen_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` };
+        
+        const newMessages = [
+            { role: 'user', content: message, timestamp: new Date() },
+            { role: 'model', content: data.response_message, timestamp: new Date() }
+        ];
+
+        const update = {
+            $push: { history: { $each: newMessages } },
+            $addToSet: { 
+                "extractedIntel.upi": { $each: intelUpdate.upi || [] },
+                "extractedIntel.bank_ac": { $each: intelUpdate.bank_ac || [] },
+                "extractedIntel.links": { $each: intelUpdate.links || [] }
             },
-        });
-
-        // Prepare History for Gemini
-        // Ensure history is in { role: 'user' | 'model', parts: [{ text: string }] } format
-        // or { role: 'user' | 'model', parts: string } depending on SDK version helper.
-        // The SDK typically accepts { role, parts: string | array }.
-        const chatHistory = history.map((msg: any) => ({
-            role: msg.role === 'assistant' ? 'model' : (msg.role || 'user'),
-            parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }],
-        }));
-
-        const chat = model.startChat({
-            history: chatHistory,
-        });
-
-        const result = await chat.sendMessage(message);
-        const responseText = result.response.text();
-
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            console.error("Failed to parse JSON from Gemini", responseText);
-            // Fallback
-            data = {
-                scam_detected: true,
-                confidence: 0,
-                extracted_intel: { upi: [], bank_ac: [], links: [] },
-                response_message: "Beta, I am not understanding. Can you call me?"
-            };
-        }
-
-        // 3. Update DB
-        // If sessionId exists, update. Else create.
-        const latency = Date.now() - startTime;
-        const currentTurnCount = history.length + 1; // Basic count
-
-        const intelUpdate = data.extracted_intel;
-
-        // We update the DB asynchronously to ensure the API is fast, 
-        // BUT since this is a serverless function, we should await before return usually 
-        // unless using after(). To be safe, we await.
-
-        const dbOperations = async () => {
-            const query = sessionId ? { sessionId } : { sessionId: `gen_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` };
-
-            // We want to add only the NEW messages to history in DB
-            const newMessages = [
-                { role: 'user', content: message, timestamp: new Date() },
-                { role: 'model', content: data.response_message, timestamp: new Date() }
-            ];
-
-            // Merge logic for Intel (using $addToSet to avoid duplicates)
-            const update = {
-                $push: { history: { $each: newMessages } },
-                $addToSet: {
-                    "extractedIntel.upi": { $each: intelUpdate.upi || [] },
-                    "extractedIntel.bank_ac": { $each: intelUpdate.bank_ac || [] },
-                    "extractedIntel.links": { $each: intelUpdate.links || [] }
-                },
-                $set: {
-                    scamDetected: data.scam_detected,
-                    confidence: data.confidence,
-                    "metadata.turnCount": currentTurnCount + 1, // +1 for response
-                    "metadata.latency_ms": latency
-                }
-            };
-
-            if (sessionId) {
-                await Conversation.findOneAndUpdate(query, update, { upsert: true, new: true });
-            } else {
-                // If strictly no sessionId, we create a new doc.
-                // However, the caller won't know the ID unless we return it.
-                // The spec doesn't ask to return sessionId. 
-                // We just log it for "Law Enforcement".
-                await Conversation.create({
-                    ...query,
-                    history: newMessages, // Just the current if we don't have full history log logic here
-                    extractedIntel: intelUpdate,
-                    scamDetected: data.scam_detected,
-                    confidence: data.confidence,
-                    metadata: { turnCount: 1, latency_ms: latency }
-                });
+            $set: {
+                scamDetected: data.scam_detected,
+                confidence: data.confidence,
+                "metadata.turnCount": currentTurnCount + 1,
+                "metadata.latency_ms": latency
             }
         };
 
-        await dbOperations();
+        if (sessionId) {
+            await Conversation.findOneAndUpdate(query, update, { upsert: true, new: true });
+        } else {
+            await Conversation.create({
+                ...query,
+                history: newMessages,
+                extractedIntel: intelUpdate,
+                scamDetected: data.scam_detected,
+                confidence: data.confidence,
+                metadata: { turnCount: 1, latency_ms: latency }
+            });
+        }
+    };
+    
+    await dbOperations();
 
-        // 4. Return Response
-        return NextResponse.json({
-            scam_detected: data.scam_detected,
-            response_message: data.response_message,
-            extracted_intel: data.extracted_intel,
-            confidence: data.confidence,
-            metadata: {
-                turn_count: currentTurnCount,
-                latency_ms: latency
-            }
-        });
+    // 4. Return Response
+    const jsonResponse = NextResponse.json({
+        scam_detected: data.scam_detected,
+        response_message: data.response_message,
+        extracted_intel: data.extracted_intel,
+        confidence: data.confidence,
+        metadata: {
+            turn_count: currentTurnCount,
+            latency_ms: latency
+        }
+    });
 
-    } catch (error) {
-        console.error("API Error:", error);
-        return NextResponse.json({
-            scam_detected: false,
-            response_message: "Error processing request",
-            extracted_intel: { upi: [], bank_ac: [], links: [] },
-            confidence: 0,
-            metadata: { turn_count: 0, latency_ms: 0 }
-        }, { status: 500 });
-    }
+    return setCorsHeaders(jsonResponse);
+
+  } catch (error) {
+    console.error("API Error:", error);
+    // Return a valid JSON even on error, matching schema loosely if possible or standard error
+    const errorResponse = NextResponse.json({ 
+        scam_detected: false,
+        response_message: "Server encountered an error. Please try again.",
+        extracted_intel: { upi: [], bank_ac: [], links: [] },
+        confidence: 0,
+        metadata: { turn_count: 0, latency_ms: 0, error: String(error) }
+    }, { status: 500 });
+
+    return setCorsHeaders(errorResponse);
+  }
 }
