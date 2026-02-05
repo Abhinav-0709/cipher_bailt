@@ -83,7 +83,9 @@ export default function DemoPage() {
             if (data.error) {
                 setMessages(prev => [...prev, { role: 'model', content: "⚠️ System Error: " + data.error }]);
             } else {
-                setMessages(prev => [...prev, { role: 'model', content: data.response_message }]);
+                // Compatible with new Validator API format (data.reply) AND old internal format fallback
+                const replyText = data.reply || data.response_message || "No response text";
+                setMessages(prev => [...prev, { role: 'model', content: replyText }]);
                 setScamDetected(data.scam_detected);
                 setConfidence(data.confidence);
                 setIntel(data.extracted_intel);

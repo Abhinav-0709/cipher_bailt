@@ -11,9 +11,12 @@ export interface IConversation extends Document {
         upi: string[];
         bank_ac: string[];
         links: string[];
+        phoneNumbers: string[];
+        suspiciousKeywords: string[];
     };
     scamDetected: boolean;
     confidence: number;
+    finalReportSent: boolean;
     metadata: {
         turnCount: number;
         latency_ms?: number;
@@ -35,9 +38,12 @@ const ConversationSchema: Schema = new Schema({
         upi: { type: [String], default: [] },
         bank_ac: { type: [String], default: [] },
         links: { type: [String], default: [] },
+        phoneNumbers: { type: [String], default: [] },
+        suspiciousKeywords: { type: [String], default: [] },
     },
     scamDetected: { type: Boolean, default: false },
     confidence: { type: Number, default: 0 },
+    finalReportSent: { type: Boolean, default: false },
     metadata: {
         turnCount: { type: Number, default: 0 },
         latency_ms: { type: Number },
